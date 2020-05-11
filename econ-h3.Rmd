@@ -1,0 +1,640 @@
+---
+title: "econ-h3"
+author: "Gabriel De La Rosa"
+date: "5/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(janitor)
+```
+
+
+```{r}
+# First, read in the data...
+
+raw_data <- read_csv(here("Homework 3 Data (1).csv")) %>% 
+  clean_names()
+
+# And let's take a look at this
+
+ggplot(data = raw_data, aes(y = price_dollars)) +
+  geom_point(aes(x = q_low_gallons),
+             color = "blue") +
+  geom_point(aes(x = q_high_gallons),
+             color = "red")
+```
+
+
+### Question 1:
+
+* What is the aggregate daily demand curve for gasoline? 
+* What is the supply curve for gasoline? 
+* What is the “benefit” to consumers under the status quo?
+* What is the “benefit” to producers under the status quo? 
+* What is the environmental cost under the status quo (locally and in the rest of the world)?
+
+##### Make linear models for low and high
+```{r}
+# First, let's pull linear models for both of these:
+
+lm_high <- lm(price_dollars~q_high_gallons, data = raw_data)
+
+# Extract the coefficients as numbers...
+lm_high_coef <- coef(lm_high)[2]
+lm_high_int <- coef(lm_high)[1]
+
+# Then make a function
+high_price_fx <- function(gallons){
+  price = lm_high_coef * gallons + lm_high_int
+  return(price)
+}
+high_gal_fx <- function(price){
+  gallons = (price - lm_high_int) / lm_high_coef
+  gallons[gallons<0] <- NA
+  return(gallons)
+}
+
+# Repeat for low...
+lm_low <- lm(price_dollars ~ q_low_gallons, data = raw_data)
+lm_low_coef <- coef(lm_low)[2]
+lm_low_int <- coef(lm_low)[1]
+low_price_fx <- function(gallons){
+  price = lm_low_coef * gallons + lm_low_int
+  return(price)
+}
+low_gal_fx <- function(price){
+  gallons = (price - lm_low_int) / lm_low_coef
+  gallons[gallons < 0] <- NA
+  return(gallons)
+}
+
+# Test these funcitons on the initial df...
+
+lm_predict <- raw_data %>% 
+  mutate(low_predict = low_gal_fx(price_dollars)) %>% 
+  mutate(high_predict = high_gal_fx(price_dollars))
+
+# Plot them to make sure...
+ggplot(data = lm_predict, aes(y = price_dollars)) +
+  geom_point(aes(x = q_low_gallons),
+             color = "blue") +
+  geom_point(aes(x = q_high_gallons),
+             color = "red") +
+  geom_line(aes(x = low_predict),
+             color = "blue") +
+  geom_line(aes(x = high_predict),
+            color = "red")
+
+# YEW
+```
+
+##### Create an aggregate demand curve:
+
+```{r}
+# make a range of prices to predict these...
+price_seq <- seq(0, lm_high_int, by = .1)
+
+# Then add demand curve predicted values, then add them.
+agg_demand <- data.frame(price_seq) %>% 
+  mutate(low_gal = low_gal_fx(price_seq)) %>% 
+  mutate(high_gal = high_gal_fx(price_seq)) %>% 
+  rowwise() %>% 
+  mutate(agg = sum(low_gal, high_gal, na.rm = TRUE))
+
+# Nice plot
+ggplot(data = agg_demand, aes(y = price_seq)) +
+  geom_line(aes(x = low_gal),
+            color = "blue") +
+  geom_line(aes(x = high_gal),
+            color = "red") +
+    geom_line(aes(x = agg),
+            color = "black") +
+  theme_minimal()
+```
+
+##### Let's make an LM for the aggregate demand curve, when it doesn't equal the high curve...:
+```{r}
+# This is for just high...
+agg_demand_low <- agg_demand %>% 
+  filter(!is.na(low_gal))
+# Make LM
+agg_lm <- lm(price_seq~agg, data = agg_demand_low)
+# Pull coefficients
+agg_coef <- coef(agg_lm)[2]
+agg_int <- coef(agg_lm)[1]
+# Make functions
+agg_price_fx <- function(gallons){
+  price = agg_coef * gallons + agg_int
+  return(price)
+}
+agg_gal_fx <- function(price){
+  gallons = (price - agg_int) / agg_coef
+  gallons[gallons < 0] <- NA
+  return(gallons)
+}
+```
+
+##### Agg demand curve is...
+
+\[price = \left\{\begin{matrix} -2.73*10^{-5} (gallons)+ 15.8, & gallons < 150789.3 \\ -1.93*10^{-5}(gallons) + 14.6, & gallons \geq 150789.3 \end{matrix}\right.\]
+
+##### Supply Curve for Gasoline
+
+```{r}
+# Supply curve: current gas price is 3
+# intercept = 0,0
+current_gallons <- agg_gal_fx(3)
+supply_coef <- (3/current_gallons)
+supply_price_fx <- function(gallons){
+  price = supply_coef*gallons
+  price[price<0] <- NA
+  return(price)
+}
+supply_gal_fx <- function(price){
+  gallons <- price/supply_coef
+  gallons[gallons<0] <- NA
+  return(gallons)
+}
+
+# Test this and add to other df...
+
+sup_dem <-agg_demand %>% 
+  mutate(supply_gal = supply_gal_fx(price_seq))
+
+# Plot it to double check...
+ggplot(data = sup_dem, aes(y = price_seq)) +
+  geom_line(aes(x = low_gal),
+            color = "blue") +
+  geom_line(aes(x = high_gal),
+            color = "red") +
+    geom_line(aes(x = agg),
+            color = "black") +
+  geom_line(aes(x = supply_gal)) +
+  theme_minimal()
+```
+##### Supply curve
+
+price = 5.0 * 10<sup>-6</sup> * gallons
+
+##### Benefit to consumers:
+
+The benefit to consumers is the triangle above the equilibrium, so ...
+
+```{r}
+# The slope changes at price = lm_high_intercept, this is the kink point
+kink_gal <- agg_gal_fx(lm_low_int)
+# get your x intercept...
+agg_x_int <- agg_gal_fx(0)
+# This is the number of gallons consumed at $3
+agg_eq_gal <- agg_gal_fx(3)
+# Integrate under both curves...
+cons_surp1 <- integrate(high_price_fx, 0, kink_gal)$value
+cons_surp2 <- integrate(agg_price_fx, kink_gal, agg_x_int)$value
+# Add em together
+added_surp <- cons_surp1 + cons_surp2
+# Then subtract the square under this (price = 3, demand = agg_eq_gal)
+cons_surp <- added_surp - (3 * agg_eq_gal)
+```
+
+The consumer benefit is...`r round(cons_surp, 2)`
+
+##### Producer Surplus
+
+Producer surplus is below the equilibrium...so...
+```{r}
+# First, calculate net cost to producers
+prod_cost <- integrate(supply_price_fx, 0, agg_eq_gal)$value
+# Then, subtract from the square for equilibrium point:
+prod_surplus <- (3*agg_eq_gal) - prod_cost
+```
+
+the producer surplus is...`r prod_surplus`
+
+##### Environmental Cost
+
+The environmental cost is $1.50 per gallon, within the country.
+
+```{r}
+# Cost is the number of gallons produced times the cost per gallon
+env_cost_sq <- agg_eq_gal * 1.50
+env_world_cost_sq <- agg_eq_gal * 0.5
+```
+
+The environmental cost to the country is...`r env_cost_sq`
+
+The environmental cost to the world is...`r env_world_cost_sq`
+
+### Question 2
+
+* How is consumer benefit divided between “High” and “Low” income consumers?
+
+ Let's find out the number of gallons each income bracket consumes at equilibrium:
+ 
+```{r}
+# High eq gallons:
+high_gal_sq <- high_gal_fx(3)
+low_gal_sq <- low_gal_fx(3)
+# Then integrate under their curves:
+high_int_sq <- integrate(high_price_fx, 0, high_gal_sq)$value
+low_int_sq <- integrate(low_price_fx, 0, low_gal_sq)$value
+# Then, subtract the square for equilibrium points:
+high_surplus_sq <- high_int_sq - (3*high_gal_sq)
+low_surplus_sq <- low_int_sq - (3*low_gal_sq)
+# Then, get what percent each bracket makes of the total surplus:
+high_surplus_pct <- high_surplus_sq / (high_surplus_sq +low_surplus_sq)
+low_surplus_pct <- low_surplus_sq / (high_surplus_sq +low_surplus_sq)
+```
+ 
+High income consumers receive `r high_surplus_pct` of the benefit, while low income consumers receive `r low_surplus_pct` of the benefit.
+
+### Question 3:
+
+A gas tax of $1.00/gal. is proposed. What would be the effects of this tax on: 
+
+a) The amount of gasoline produced and consumed.
+b) The price of gasoline.
+c) Welfare of “High” income consumers.
+d) Welfare of “Low” income consumers. Welfare of gas producers.
+e) Local environmental damage.
+f) Rest of world environmental damage. Total revenue generated by the tax.
+
+##### a. Gas produced and consumed:
+
+We can add one (y-int) to our supply function.
+
+```{r}
+# Let's make a pair of functions for this...
+tax_supply_price_fx <- function(gallons){
+  price = supply_coef*gallons + 1
+  price[price<0] <- NA
+  return(price)
+}
+tax_supply_gal_fx <- function(price){
+  gallons <- price/supply_coef + 1
+  gallons[gallons<0] <- NA
+  return(gallons)
+}
+```
+
+Then, we can solve for the intercept...
+Using algebra...
+
+ price = supply_coef*gallons + 1
+ price = agg_coef * gallons + agg_int
+
+supply_coef * gallons + 1 = agg_coeff * gallons + agg_int
+
+supply_coef * gallons - agg_coeff * gallons = agg_int - 1
+gallons(supply_coef - agg_coeff) = agg_int - 1
+gallons = (agg_int - 1)/(supply_coef - agg_coef) 
+
+```{r}
+tax_gal <- (agg_int - 1)/(supply_coef - agg_coef)
+```
+
+
+There are `r tax_gal` gallons produced with the tax.
+
+#### b. Tax price
+
+We can plug our new equilibrium gallons into the new supply curve:
+
+```{r}
+tax_price <- tax_supply_price_fx(tax_gal)
+```
+
+The new cost of gas is `r tax_price`
+
+```{r}
+# Let's graph this to make sure...
+
+# tax_dem <- sup_dem %>% 
+#   mutate(new_supply = tax_supply_gal_fx(price_seq))
+# 
+# ggplot(data = tax_dem, aes(y = price_seq)) +
+#   geom_line(aes(x = low_gal),
+#             color = "blue") +
+#   geom_line(aes(x = high_gal),
+#             color = "red") +
+#     geom_line(aes(x = agg),
+#             color = "black") +
+#   #geom_line(aes(x = supply_gal)) +
+#   geom_line(aes(x = new_supply),
+#             linetype = "dotted") +
+#   theme_minimal()
+```
+
+
+##### c. Welfare of high income consumers:
+
+First, let's find out how much high income consumers actually consume under the new price:
+
+```{r}
+# Plug the tax price into our gallon function:
+high_gal_tax <- high_gal_fx(tax_price)
+# Integrate under the curve: 
+high_int_tax <- integrate(high_price_fx, 0, high_gal_tax)$value
+# Then, subtract the profit square: tax_price = total price with tax
+high_tax_ben <- high_int_tax - (high_gal_tax * tax_price)
+```
+
+The net benefit to high income groups is `r high_tax_ben`
+
+##### d. Welfare of low income consumers:
+
+```{r}
+# Plug the tax price into our gallon function:
+low_gal_tax <- low_gal_fx(tax_price)
+# Integrate under the curve: 
+low_int_tax <- integrate(low_price_fx, 0, high_gal_tax)$value
+# Then, subtract the profit square:
+low_tax_ben <- low_int_tax - (low_gal_tax * tax_price)
+```
+
+The net benefit to low income groups is `r low_tax_ben`
+
+##### e. Local environmental damage:
+The local environmental damage is 1.50 x the new amount of gasoline produced
+```{r}
+tax_env_damage <- 1.50 * tax_gal
+```
+
+The local environmental damage is `r tax_env_damage`
+
+##### f. Global environmental damage:
+The global environmental damage is 0.50 x the new amount of gasoline produced
+```{r}
+tax_world_damage <- 0.50 * tax_gal
+```
+
+The global environmental damage is `r tax_world_damage`
+
+##### g. Tax revenue generated
+
+The tax revenue generated is the tax price * gallons produced
+```{r}
+tax_rev <- tax_gal * 1.00
+```
+
+The tax revenue generated is $`r tax_rev`
+
+
+### Question 4.
+
+Now, assume that all revenue from a tax will be redistributed to the two groups in proportion to their pre-tax consumption of gas. For example, if 80% of the gas was consumed by High income consumers, then they get 80% of the tax revenue.
+
+Also assume that “Low” income consumers bear all local environmental costs. For a range of gas taxes (ranging from $0 - $5.00/gal), calculate the effects of the tax on:
+
+
+a. Overall welfare of “High” income consumers
+b. Overall welfare of “Low” income consumers
+c. Gas producers
+
+##### First, we need to find equilibrium gallons and prices for 1:5 dollars...
+
+```{r}
+# Gallons (per equation in 3a):
+tax_gal2 <- (agg_int - 2)/(supply_coef - agg_coef)
+tax_gal3 <- (agg_int - 3)/(supply_coef - agg_coef)
+tax_gal4 <- (agg_int - 4)/(supply_coef - agg_coef)
+tax_gal5 <- (agg_int - 5)/(supply_coef - agg_coef)
+
+tax_supply_price2_fx <- function(gallons){
+  price = supply_coef*gallons + 2
+  price[price<0] <- NA
+  return(price)
+}
+tax_supply_price3_fx <- function(gallons){
+  price = supply_coef*gallons + 3
+  price[price<0] <- NA
+  return(price)
+}
+tax_supply_price4_fx <- function(gallons){
+  price = supply_coef*gallons + 4
+  price[price<0] <- NA
+  return(price)
+}
+tax_supply_price5_fx <- function(gallons){
+  price = supply_coef*gallons + 5
+  price[price<0] <- NA
+  return(price)
+}
+
+# Prices # This is the total price at the new production (gallons) for each tax:
+tax_price1 <- tax_supply_price_fx(tax_gal)
+tax_price2 <- tax_supply_price2_fx(tax_gal2)
+tax_price3 <- tax_supply_price3_fx(tax_gal3)
+tax_price4 <- tax_supply_price4_fx(tax_gal4)
+tax_price5 <- tax_supply_price5_fx(tax_gal5)
+
+# This is the cost of the tax * the number of gallons produced
+tax_rev <- tax_gal * 1.00
+tax_rev2 <- tax_gal2 * 2.00
+tax_rev3 <- tax_gal3 * 3.00
+tax_rev4 <- tax_gal4 * 4.00
+tax_rev5 <- tax_gal5 * 5.00
+# Porportional gas consumption:
+# This is the amount they consume at price 0 divided by the aggregate gallons consumed
+high_prop <- high_gal_fx(3)/agg_eq_gal
+low_prop <- low_gal_fx(3)/agg_eq_gal
+```
+
+##### Overall welfare of "high" income consumers
+
+We can calculate welfare like we did above, however, we need to add in the porportional tax return to high income consumers...
+```{r}
+# Plug the tax price into our gallon function:
+high_gal_tax <- high_gal_fx(tax_price)
+high_gal_tax2 <- high_gal_fx(tax_price2)
+high_gal_tax3 <- high_gal_fx(tax_price3)
+high_gal_tax4 <- high_gal_fx(tax_price4)
+high_gal_tax5 <- high_gal_fx(tax_price5)
+# Integrate under the curve: 
+high_int_tax <- integrate(high_price_fx, 0, high_gal_tax)$value
+high_int_tax2 <- integrate(high_price_fx, 0, high_gal_tax2)$value
+high_int_tax3 <- integrate(high_price_fx, 0, high_gal_tax3)$value
+high_int_tax4 <- integrate(high_price_fx, 0, high_gal_tax4)$value
+high_int_tax5 <- integrate(high_price_fx, 0, high_gal_tax5)$value
+# Then, subtract the profit square, and add back in the porportional tax revenue:
+high_tax_new_ben <- high_int_tax - (high_gal_tax * tax_price) + tax_rev * high_prop
+high_tax_new_ben2 <- high_int_tax2 - (high_gal_tax2 * tax_price2) + tax_rev2 * high_prop
+high_tax_new_ben3 <- high_int_tax3 - (high_gal_tax3 * tax_price3) + tax_rev3 * high_prop
+high_tax_new_ben4 <- high_int_tax4 - (high_gal_tax4 * tax_price4) + tax_rev4 * high_prop
+high_tax_new_ben5 <- high_int_tax5 - (high_gal_tax5 * tax_price5) + tax_rev5 * high_prop
+```
+
+##### Overall welfare for low income consumers:
+```{r}
+# Plug the tax price into our gallon function:
+low_gal_tax <- low_gal_fx(tax_price)
+low_gal_tax2 <- low_gal_fx(tax_price2)
+low_gal_tax3 <- low_gal_fx(tax_price3)
+low_gal_tax4 <- low_gal_fx(tax_price4)
+low_gal_tax5 <- low_gal_fx(tax_price5)
+# Integrate under the curve: 
+low_int_tax <- integrate(low_price_fx, 0, low_gal_tax)$value
+low_int_tax2 <- integrate(low_price_fx, 0, low_gal_tax2)$value
+low_int_tax3 <- integrate(low_price_fx, 0, low_gal_tax3)$value
+low_int_tax4 <- integrate(low_price_fx, 0, low_gal_tax4)$value
+low_int_tax5 <- integrate(low_price_fx, 0, low_gal_tax5)$value
+# Then, subtract the profit square, and add back in the porportional tax revenue:
+# For low income, we also need to subtract the environmental damage from this:
+# Benefit = The integral - Tax cost + proportional tax revenue - environmental damage
+low_tax_new_ben <- low_int_tax + (tax_rev * low_prop) - (low_gal_tax * tax_price)  - (1.50 * tax_gal)
+low_tax_new_ben2 <- low_int_tax2 - (low_gal_tax2 * tax_price2) + (tax_rev2 * low_prop) - (1.50 * tax_gal2)
+low_tax_new_ben3 <- low_int_tax3 - (low_gal_tax3 * tax_price3) + (tax_rev3 * low_prop) - (1.50 * tax_gal3)
+low_tax_new_ben4 <- low_int_tax4 - (low_gal_tax4 * tax_price4) + (tax_rev4 * low_prop) - (1.50 * tax_gal4)
+low_tax_new_ben5 <-low_int_tax5 - (low_gal_tax5 * tax_price5) + (tax_rev5 * low_prop) - (1.50 * tax_gal5)
+```
+
+##### Overall welfare for gas producers:
+We need calculate total revenue at each price
+Then subtract the cost to producers
+
+```{r}
+# First, calculate net cost to producers
+prod_cost_tax1 <- integrate(supply_price_fx, 0, tax_price)$value
+prod_cost_tax2 <- integrate(supply_price_fx, 0, tax_price2)$value
+prod_cost_tax3 <- integrate(supply_price_fx, 0, tax_price3)$value
+prod_cost_tax4 <- integrate(supply_price_fx, 0, tax_price4)$value
+prod_cost_tax5 <- integrate(supply_price_fx, 0, tax_price5)$value
+
+# Then, subtract from the square for equilibrium point:
+prod_surplus_tax1 <- (supply_gal_fx(tax_price)*tax_price) - prod_cost_tax1
+prod_surplus_tax2 <- (supply_gal_fx(tax_price2)*tax_price2) - prod_cost_tax2
+prod_surplus_tax3 <- (supply_gal_fx(tax_price3)*tax_price3) - prod_cost_tax3
+prod_surplus_tax4 <- (supply_gal_fx(tax_price4)*tax_price4) - prod_cost_tax4
+prod_surplus_tax5 <- (supply_gal_fx(tax_price5)*tax_price5) - prod_cost_tax5
+```
+
+##### Table with all of these...
+
+```{r}
+tax <- c(1,2,3,4,5)
+high_benefit <- c(high_tax_new_ben, high_tax_new_ben2, high_tax_new_ben3, high_tax_new_ben4, high_tax_new_ben5)
+low_benefit <- c(low_tax_new_ben, low_tax_new_ben2, low_tax_new_ben3, low_tax_new_ben4, low_tax_new_ben5)
+prod_surplus <- c(prod_surplus_tax1, prod_surplus_tax2, prod_surplus_tax3, prod_surplus_tax4, prod_surplus_tax5)
+
+tax_benefit_df <- data.frame(tax, high_benefit, low_benefit, prod_surplus)
+```
+
+### Question 5: 
+
+A new electric car technology is invented and it lowers the demand curves of all income groups by half (vertically). Under these new demand curves, what are the effects on:
+
+a. Gas consumption by “High” income consumers
+b. Gas consumption by “Low” income consumers
+c. Gas price
+d. Local environmental damage from gasoline
+e. Rest of world environmental damage from gasoline
+
+##### a. Gas consumption on high income:
+First, let's make new demand curves:
+
+```{r}
+# The new demand curves are just the old curves with the intercept halved:
+# For high
+electric_high_price_fx <- function(gallons){
+  price = (lm_high_coef) * gallons + (lm_high_int/2)
+  return(price)
+}
+electric_high_gal_fx <- function(price){
+  gallons = (price - lm_high_int/2) / lm_high_coef
+  gallons[gallons<0] <- NA
+  return(gallons)
+}
+# And for low income...
+
+electric_low_price_fx <- function(gallons){
+  price = (lm_low_coef/2) * gallons + (lm_low_int/2)
+  return(price)
+}
+electric_low_gal_fx <- function(price){
+  gallons = (price - (lm_low_int/2)) / lm_low_coef
+  gallons[gallons < 0] <- NA
+  return(gallons)
+}
+```
+
+##### Aggregate demand:
+```{r}
+# This is just the original aggregate demand curve with the intercept halved:
+electric_agg_gal_fx <- function(price){
+  gallons = (price - (agg_int/2)) / agg_coef
+  gallons[gallons < 0] <- NA
+  return(gallons)
+}
+
+electric_agg_price_fx <- function(gallons){
+  price = agg_coef * gallons + (agg_int/2)
+  return(price)
+}
+```
+Then, we need to find out total consumption and the equilibrium price:
+```{r}
+# The new equilibrium gallons are where the equations meet...
+elec_gallons <-  (agg_int/2)/(supply_coef - agg_coef) 
+# The total gallons consumed is this plugged into the new agg demand curve:
+elec_agg_price <- electric_agg_price_fx(elec_gallons)
+```
+Then, we can plug this price back into the new demand curves:
+```{r}
+elec_high_gal <- electric_high_gal_fx(elec_agg_price)
+```
+So,high income groups consume `r elec_high_gal` gallons
+
+##### b. 
+We repeat for low income groups...
+```{r}
+elec_low_gal <- electric_low_gal_fx(elec_agg_price)
+```
+Finding low income groups consume `r elec_low_gal` of gasoline
+
+##### c. 
+
+Gas price is `r elec_agg_price` as calculated above...
+
+##### d. 
+
+The local environmental damage is 1.5 * new equilibrium gallons consumed: 
+```{r}
+elec_env_damage <- (1.5 * elec_gallons)
+```
+
+which is `r elec_gallons` dollars.
+
+##### e. 
+The global environmental damage is 0.5 * new equilibrium gallons...
+```{r}
+elec_world_damage <- (0.5 * elec_gallons)
+```
+which is `r elec_world_damage` dollars.
+
+### Question 6:
+
+The goal is to find the tax that causes consumption of the same amount of gas as with electric technology.
+
+so...we can plug the electric quantity into the original aggregate demand curve...
+
+```{r}
+opt_price <- agg_price_fx(elec_gallons)
+```
+
+So, we want gas to cost `r opt_price` dollars after tax.
+
+Which is just the new price minus $3.
+
+```{r}
+opt_tax <- (opt_price - 3)
+```
+
+And so the optimal tax is `r opt_tax`
+
+
+
+
